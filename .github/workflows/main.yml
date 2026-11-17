@@ -1,37 +1,50 @@
-name: Alerta ETF
+name: Relatório Diário de Tráfego
 
 on:
   schedule:
-    # From 8 a.m. till 4 p.m. UTC, every hour from Monday to Friday
-    # (cobre o horário da bolsa de Xetra em hora de Portugal/Alemanha)
-    - cron: "0 8-16 * * 1-5"
-  workflow_dispatch:   # manual trigger
-
-permissions:
-  contents: write      # necessário para guardar o estado.json
+    # Executa todos os dias às 08:00 UTC
+    - cron: '0 8 * * *'
+  workflow_dispatch: # Permite executar manualmente a partir do GitHub
 
 jobs:
-  verificar:
+  enviar-trafego:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - name: Obter dados de tráfego via GitHub API
+        id: traffic
+        uses: actions/github-script@v7
         with:
-          python-version: "3.12"
+          script: |
+            try {
+              const views = await github.rest.repos.getViews({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per: 'day'
+              });
+              
+              const clones = await github.rest.repos.getClones({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per: 'day'
+              });
 
-      - name: Instalar dependências
-        run: pip install yfinance
+              // Pegar no total do dia mais recente
+              const totalViews = views.data.count;
+              const uniqueViews = views.data.uniques;
+              const totalClones = clones.data.count;
+              const uniqueClones = clones.data.uniques;
 
-      - name: Verificar preço e avisar
-        run: python aging_population.py ${{ github.event_name == 'workflow_dispatch' && '--resumo' || '' }}
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+              return `👁️ *Visualizações:* ${totalViews} (${uniqueViews} utilizadores únicos)\n📥 *Clones:* ${totalClones} (${uniqueClones} utilizadores únicos)`;
+            } catch (error) {
+              return `Erro ao obter tráfego: ${error.message}`;
+            }
 
-      - name: Guardar estado
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          git add estado.json
-          git diff --cached --quiet || (git commit -m "Atualiza estado" && git push)
+      - name: Enviar relatório para o Telegram
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            📊 *Relatório Diário de Acessos*
+            
+            ${{ steps.traffic.outputs.result }}
